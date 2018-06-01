@@ -37,10 +37,10 @@ namespace MSIX {
     } BlockPlusStream;
 
     // This represents a subset of a Stream
-    class BlockMapStream : public StreamBase
+    class BlockMapStream final : public StreamBase
     {
     public:
-        BlockMapStream(IMSIXFactory* factory, std::string decodedName, IStream* stream, std::vector<Block>& blocks)
+        BlockMapStream(IMSIXFactory* factory, std::string decodedName, const ComPtr<IStream>& stream, std::vector<Block>& blocks)
             : m_factory(factory), m_decodedName(decodedName), m_stream(stream)
         {
             // Determine overall stream size
@@ -61,7 +61,7 @@ namespace MSIX {
             for (auto block = blocks.begin(); ((sizeRemaining != 0) && (block != blocks.end())); block++)
             {
                 auto rangeStream = ComPtr<IStream>::Make<RangeStream>(offset, std::min(sizeRemaining, BLOCKMAP_BLOCK_SIZE), stream);                
-                auto hashStream = ComPtr<IStream>::Make<HashStream>(rangeStream.Get(), block->hash);
+                auto hashStream = ComPtr<IStream>::Make<HashStream>(rangeStream, block->hash);
                 std::uint64_t blockSize = std::min(sizeRemaining, BLOCKMAP_BLOCK_SIZE);
 
                 BlockPlusStream bs;
@@ -80,7 +80,7 @@ namespace MSIX {
             ThrowHrIfFailed(Seek(li, STREAM_SEEK_SET, nullptr));
         }
 
-        HRESULT STDMETHODCALLTYPE Seek(LARGE_INTEGER move, DWORD origin, ULARGE_INTEGER *newPosition) override
+        HRESULT STDMETHODCALLTYPE Seek(LARGE_INTEGER move, DWORD origin, ULARGE_INTEGER *newPosition) noexcept override try
         {
             LARGE_INTEGER newPos = { 0 };
             switch (origin)
@@ -100,9 +100,9 @@ namespace MSIX {
 
             m_currentBlock = m_blockStreams.begin();
             return S_OK;
-        }
+        } CATCH_RETURN();
 
-        HRESULT STDMETHODCALLTYPE Read(void* buffer, ULONG countBytes, ULONG* actualRead) override
+        HRESULT STDMETHODCALLTYPE Read(void* buffer, ULONG countBytes, ULONG* actualRead) noexcept override try
         {
             std::uint32_t bytesRead = 0;
             if (m_relativePosition < m_streamSize)
@@ -138,27 +138,28 @@ namespace MSIX {
             }
             if (actualRead) { *actualRead = bytesRead; }
             return (countBytes == bytesRead) ? S_OK : S_FALSE;
-        }
+        } CATCH_RETURN();
 
-        HRESULT STDMETHODCALLTYPE GetCompressionOption(APPX_COMPRESSION_OPTION* compressionOption) override
+        HRESULT STDMETHODCALLTYPE GetCompressionOption(APPX_COMPRESSION_OPTION* compressionOption) noexcept override try
         {
-            return ResultOf([&]{ return m_stream.As<IAppxFile>()->GetCompressionOption(compressionOption); });
-        }
+            return m_stream.As<IAppxFile>()->GetCompressionOption(compressionOption);
+        } CATCH_RETURN();
 
-        HRESULT STDMETHODCALLTYPE GetName(LPWSTR* fileName) override
+        HRESULT STDMETHODCALLTYPE GetName(LPWSTR* fileName) noexcept override try
         {
             return m_factory->MarshalOutString(m_decodedName, fileName);
-        }
+        } CATCH_RETURN();
 
-        HRESULT STDMETHODCALLTYPE GetContentType(LPWSTR* contentType) override
+        HRESULT STDMETHODCALLTYPE GetContentType(LPWSTR* contentType) noexcept override try
         {
-            return ResultOf([&]{ return m_stream.As<IAppxFile>()->GetContentType(contentType); });
-        }
+            return m_stream.As<IAppxFile>()->GetContentType(contentType);
+        } CATCH_RETURN();
         
-        HRESULT STDMETHODCALLTYPE GetSize(UINT64* size) override
+        HRESULT STDMETHODCALLTYPE GetSize(UINT64* size) noexcept override try
         {
-            return ResultOf([&]{ if (size) { *size = m_streamSize; }});
-        }
+            if (size) { *size = m_streamSize; }
+            return static_cast<HRESULT>(Error::OK);
+        } CATCH_RETURN();
       
     protected:
         std::vector<BlockPlusStream>::iterator m_currentBlock;
